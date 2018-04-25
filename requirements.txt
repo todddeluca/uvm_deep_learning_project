@@ -1,2 +1,5 @@
 pydicom
 projd
+nibabel
+# moviepy
+imageio
