@@ -54,8 +54,6 @@ def augment_image(img, crop_shape=None):
         return img
 
 
-
-
 class NiftiSequence(keras.utils.Sequence):
 
     def __init__(self, x_infos, batch_size, crop_shape, shuffle=True):

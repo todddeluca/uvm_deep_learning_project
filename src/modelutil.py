@@ -23,7 +23,6 @@ import shutil
 import sys
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import confusion_matrix
-
 import uuid
 
 import matplotlib.pyplot as plt # data viz
