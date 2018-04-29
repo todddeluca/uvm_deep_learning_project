@@ -63,6 +63,37 @@ def resample_image(image, spacing, new_spacing, metadata_only=False):
     return new_image, new_spacing
 
 
+def resample_mask(image, spacing, new_spacing, metadata_only=False, order=3):
+    '''
+    image: a 3d volume that is an image mask
+    spacing: the size of a voxel in some units.  E.g. [0.3, 0.3, 0.9]
+    new_spacing: the size of a voxel after resampling, in some units.  E.g. [1.0, 1.0, 1.0]
+    
+    returns: resampled image and new spacing adjusted because images have integer dimensions.
+    '''
+    # calculate resize factor required to change image to new shape
+    spacing = np.array(spacing)
+    new_spacing = np.array(new_spacing)
+    spacing_resize_factor = spacing / new_spacing
+    new_real_shape = image.shape * spacing_resize_factor
+    new_shape = np.round(new_real_shape).astype(int)
+    real_resize_factor = new_shape / image.shape
+    
+    # adjusted spacing to account for integer dimensions of resized image.
+    new_spacing = spacing / real_resize_factor
+    
+    if metadata_only:
+        new_image = np.zeros(new_shape)
+    else:
+        new_image = scipy.ndimage.interpolation.zoom(image, real_resize_factor, order=order)
+#         interpolation = cv2.INTER_NEAREST
+#         new_image = cv2.resize(image, dsize=None, fx=resize_x, fy=resize_y, interpolation=interpolation)  
+        # opencv assumes y, x, channels umpy array, so y = z pfff
+        # print "Shape is now : ", res.shape
+        
+    return new_image, new_spacing
+
+
 def normalize_nifti_image(image):
     '''
     Normalize voxel units by clipping them to lie between -1000 and 1000 hounsfield units 
@@ -81,6 +112,11 @@ def get_preprocessed_image_path(scan_id, preprocessed_dir):
 
 
 def preprocess_nifti_scans(normals_dir, fractures_dir, dest_dir, metadata_path, delete_existing=False, metadata_only=False):
+    '''
+    metadata_only: if True, scan images are not preprocessed and saved to disk, but metadata is generated as if it had been.
+      This is useful for quickly regenerating metadata that does not require reprocessing all files, 
+      like when adding `pp_pixdim0`, etc. to metadata.
+    '''
     
     if delete_existing and dest_dir.isdir():
         print('Removing existing dest dir:', dest_dir)

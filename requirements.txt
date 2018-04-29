@@ -3,3 +3,6 @@ projd
 nibabel
 # moviepy
 imageio
+SimpleITK
+opencv-python
+
