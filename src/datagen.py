@@ -28,32 +28,6 @@ import util
 import preprocessing
 
 
-def random_crop(img, shape):
-    '''
-    Randomly crop an image to a shape.  Location is chosen at random from
-    all possible crops of the given shape.
-    
-    img: a volume to crop
-    shape: size of cropped volume.  e.g. (32, 32, 32)
-    '''
-    assert all(img.shape[i] >= shape[i] for i in range(len(shape)))
-    
-    # if img.shape[i] == 32 and shape[i] == 32, i_max == 0.
-    maxes = [img.shape[i] - shape[i] for i in range(len(shape))]
-    # the starting corner of the crop
-    starts = [random.randint(0, m) for m in maxes]
-    # Will this indexing work?
-    cropped_img = img[[slice(starts[i], starts[i] + shape[i]) for i in range(len(shape))]]
-    return cropped_img
-        
-
-def augment_image(img, crop_shape=None):
-    if crop_shape:
-        return random_crop(img, crop_shape)
-    else:
-        return img
-
-
 class NiftiSequence(keras.utils.Sequence):
 
     def __init__(self, x_infos, batch_size, crop_shape, shuffle=True):
@@ -148,10 +122,12 @@ class FractureSequence(keras.utils.Sequence):
             self.y = self.y.iloc[shuffled_idx].reset_index(drop=True) # shuffle and zero-index df
 
 
-def get_nifti_datagens(preprocessed_metadata_path, batch_size, crop_shape, seed=0, validation_split=0.25):
+def get_nifti_datagens(preprocessed_metadata_path, batch_size, crop_shape, seed=None, validation_split=0.25):
     '''
     Return a tuple of training ScanSequence and validation ScanSequence.
     '''
+    assert validation_split <= 1.0 and validation_split >= 0.0
+
     # Data generator
     infos = preprocessing.read_preprocessed_metadata(preprocessed_metadata_path)
     print('Data set size:', len(infos))
