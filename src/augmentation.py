@@ -109,9 +109,9 @@ def random_flip_dimensions(n_dims, p=0.5):
     '''
     # random selection of ones at a rate of p.
     idx = np.random.choice(a=[True, False], size=n_dims, p=[p, 1-p])
-    print('idx:', idx)
+    # print('idx:', idx)
     dims = np.array(range(n_dims))[idx] # [idx]
-    print('n_dims:', n_dims, ' p:', p, 'dims.shape:', dims.shape, 'dims:', dims)
+    # print('n_dims:', n_dims, ' p:', p, 'dims.shape:', dims.shape, 'dims:', dims)
     return dims
 
 
@@ -122,18 +122,46 @@ def flip_image(image, dims):
     return image
 
 
-def augment_image(img, crop_shape=None, gray_std=None, gray_disco=False, flip=None, rotate=None):
+def random_transpose_dimensions(n_dims):
+    return np.random.permutation(range(n_dims))
+
+
+def transpose_image(image, dims):
+    '''
+    image: square, cube, or hypercube
+    dims: reorder the axes of image according to this list
+    '''
+    if not all(d == image.shape[0] for d in image.shape):
+        raise Exception('transpose_image only works on images where all dimensions are equal (hypercubes).' , image.shape)
+
+    return np.transpose(image, dims)
+
+
+## AUGMENTATION
+
+
+def augment_image(img, crop_shape=None, gray_std=None, gray_disco=False, flip=None, transpose=False):
+    '''
+    gray_disco: a silly argument for debugging which gives each slice a different gray augmentation, which creates
+      a strobe-like effect when animating the image by slice.
+    '''
     if crop_shape is not None:
-        print('random crop.  crop_shape:', crop_shape)
+        # print('random crop.  crop_shape:', crop_shape)
         img = random_crop(img, crop_shape)
 
     if gray_std is not None:
-        print('gray value augmentation.  gray_std:', gray_std)
+        # print('gray value augmentation.  gray_std:', gray_std)
         img = gray_value_augment_image(img, std=gray_std, disco=gray_disco)
     
     if flip:
+        # print('flip augmentation.  flip:', flip)
         img = flip_image(img, random_flip_dimensions(len(img.shape), p=flip))
 
+    if transpose:
+        dims = random_transpose_dimensions(len(img.shape))
+        # print('transpose augmentation.  random dims:', dims)
+        img = transpose_image(img, dims)
+        
     return img
 
 

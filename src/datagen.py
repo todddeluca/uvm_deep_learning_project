@@ -26,11 +26,12 @@ from keras.utils.vis_utils import model_to_dot # visualize model
 
 import util
 import preprocessing
+import augmentation
 
 
 class NiftiSequence(keras.utils.Sequence):
 
-    def __init__(self, x_infos, batch_size, crop_shape, shuffle=True):
+    def __init__(self, x_infos, batch_size, crop_shape, shuffle=True, flip=None, transpose=False, gray_std=None):
         '''
         x_paths: list of paths to preprocessed images
         '''
@@ -42,6 +43,9 @@ class NiftiSequence(keras.utils.Sequence):
         self.batch_size = batch_size
         self.shuffle = shuffle
         self.crop_shape = crop_shape
+        self.flip = flip
+        self.transpose = transpose
+        self.gray_std = gray_std
         # assert len(self.x) == len(self.y)
 
     def __len__(self):
@@ -59,8 +63,9 @@ class NiftiSequence(keras.utils.Sequence):
         # loc indexing uses inclusive name-based indexing, I know I know don't ask, hence the -1.
         batch_x_paths = list(self.x.loc[idx * self.batch_size:(idx + 1) * self.batch_size - 1, 'pp_path'])
         # add channel dimension to each augmented (randomly cropped) image.
-        batch_x = [np.expand_dims(augment_image(preprocessing.get_preprocessed_image(path), 
-                                                crop_shape=self.crop_shape), axis=-1)
+        batch_x = [np.expand_dims(augmentation.augment_image(
+            preprocessing.get_preprocessed_image(path), crop_shape=self.crop_shape, 
+            flip=self.flip, transpose=self.transpose, gray_std=self.gray_std), axis=-1)
                    for path in batch_x_paths]
 
         # return x and y batches
@@ -71,7 +76,35 @@ class NiftiSequence(keras.utils.Sequence):
             # print('on_epoch_end: Shuffling sequence')
             self.x = self.x.sample(frac=1).reset_index(drop=True)
 
-            
+
+def get_nifti_datagens(preprocessed_metadata_path, batch_size, crop_shape, seed=None, validation_split=0.25,
+                       flip=None, transpose=False, gray_std=None):
+    '''
+    Return a tuple of training ScanSequence and validation ScanSequence.
+    '''
+    assert validation_split <= 1.0 and validation_split >= 0.0
+
+    infos = preprocessing.read_preprocessed_metadata(preprocessed_metadata_path)
+    print('Data set size:', len(infos))
+    
+    # randomly split into train and test
+    shuffled = infos.sample(frac=1, random_state=seed)
+    nrow = len(shuffled)
+    idx = int(nrow * validation_split)
+    val = shuffled.iloc[:idx, :].reindex()
+    train = shuffled.iloc[idx:, :].reindex()
+    print('Train set size:', len(train))
+    print('Validation set size:', len(val))
+    print('Batch size:', batch_size)
+    
+    train_gen = NiftiSequence(train, batch_size, crop_shape, flip=flip, transpose=transpose, gray_std=gray_std)
+    val_gen = NiftiSequence(val, batch_size, crop_shape, flip=flip, transpose=transpose, gray_std=gray_std)
+    print('Num train batches:', len(train_gen))
+    print('Num val batches:', len(val_gen))
+    return train_gen, val_gen
+
+
+
 class FractureSequence(keras.utils.Sequence):
 
     def __init__(self, x_infos, y_infos, batch_size=1, shuffle=True):
@@ -107,7 +140,7 @@ class FractureSequence(keras.utils.Sequence):
         # loc indexing uses inclusive name-based indexing, I know I know don't ask, hence the -1.
         batch_x_paths = list(self.x.loc[idx * self.batch_size:(idx + 1) * self.batch_size - 1, 'pp_path'])
         # add channel dimension to each augmented (randomly cropped) image.
-        batch_x = [np.expand_dims(augment_image(preprocessing.get_preprocessed_image(path)), axis=-1)
+        batch_x = [np.expand_dims(augmentation.augment_image(preprocessing.get_preprocessed_image(path)), axis=-1)
                    for path in batch_x_paths]
 
         batch_y = self.y.loc[idx * self.batch_size:(idx + 1) * self.batch_size - 1, 'class']
@@ -120,30 +153,6 @@ class FractureSequence(keras.utils.Sequence):
             shuffled_idx = random.sample(range(len(self.x)), k=len(self.x))
             self.x = self.x.iloc[shuffled_idx].reset_index(drop=True) # shuffle and zero-index df
             self.y = self.y.iloc[shuffled_idx].reset_index(drop=True) # shuffle and zero-index df
-
-
-def get_nifti_datagens(preprocessed_metadata_path, batch_size, crop_shape, seed=None, validation_split=0.25):
-    '''
-    Return a tuple of training ScanSequence and validation ScanSequence.
-    '''
-    assert validation_split <= 1.0 and validation_split >= 0.0
-
-    # Data generator
-    infos = preprocessing.read_preprocessed_metadata(preprocessed_metadata_path)
-    print('Data set size:', len(infos))
-    shuffled = infos.sample(frac=1, random_state=seed)
-    nrow = len(shuffled)
-    idx = int(nrow * validation_split)
-    val = shuffled.iloc[:idx, :].reindex()
-    train = shuffled.iloc[idx:, :].reindex()
-    print('Train set size:', len(train))
-    print('Validation set size:', len(val))
-    print('Batch size:', batch_size)
-    train_gen = NiftiSequence(train, batch_size, crop_shape)
-    val_gen = NiftiSequence(val, batch_size, crop_shape)
-    print('Num train batches:', len(train_gen))
-    print('Num val batches:', len(val_gen))
-    return train_gen, val_gen
 
 
 def get_nifti_fracture_datagens(preprocessed_metadata_path, batch_size=1, seed=None, validation_split=0.25):
