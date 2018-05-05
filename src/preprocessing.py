@@ -168,21 +168,17 @@ def write_preprocessed_metadata(infos, path):
     return infos
 
 
-def read_preprocessed_metadata(path):
+def read_preprocessed_metadata(path, filter='uvmmc'):
     print('reading preproccessed metadata from', path)
     with open(path, 'rb') as fh:
         infos = pickle.loads(fh.read())
     
-    # drop bad data.  
-    # 082222_190 input spacing and shape are [0.9765625, 0.9765625, 0.625] and [512, 307, 1]
-    infos = infos[infos['id'] != '082222_190']
+    if filter == 'uvmmc':
+        # drop bad data.  
+        # 082222_190 input spacing and shape are [0.9765625, 0.9765625, 0.625] and [512, 307, 1]
+        infos = infos[infos['id'] != '082222_190']
+        
     return infos
-
-
-def make_preprocessed_metadata_fun(path):
-    def md():
-        return read_preprocessed_metadata(path)
-    return md
 
 
 def main():

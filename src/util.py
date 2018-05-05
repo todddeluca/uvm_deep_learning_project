@@ -70,9 +70,14 @@ def make_animated_gif(path, img, start=0, stop=None, step=1):
     step: number of slices to skip    
     '''
     # convert to uint8 to suppress warnings from imageio
+#     print('img.dtype:', img.dtype)
     imax = img.max()
     imin = img.min()
-    img = 255 * ((img - imin) / (imax - imin)) # scale to 0..255
+    if imax != imin:
+        img = 255 * ((img - imin) / (imax - imin)) # scale to 0..255
+    else:
+        img = img * 0 # if image is all the same value.  happens with crops of segmentation masks.
+        
     img = np.uint8(img)
     
     with imageio.get_writer(path, mode='I') as writer:

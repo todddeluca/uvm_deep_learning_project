@@ -346,7 +346,7 @@ class XvertsegSequence(keras.utils.Sequence):
     '''
 
     def __init__(self, infos, batch_size=1, shuffle=True, crop_shape=None, flip=None, 
-                 transpose=False, gray_std=None):
+                 transpose=False, gray_std=None, gray_disco=False):
         '''
         infos: dataframe containing image path and segmentation mask path.
         '''
@@ -362,9 +362,9 @@ class XvertsegSequence(keras.utils.Sequence):
         
         # configure outputs and augmentation
         self.config(crop_shape=crop_shape, flip=flip, 
-                    transpose=transpose, gray_std=gray_std)
+                    transpose=transpose, gray_std=gray_std, gray_disco=gray_disco)
     
-    def config(self, batch_size=1, crop_shape=None, flip=None, transpose=False, gray_std=None):
+    def config(self, batch_size=1, crop_shape=None, flip=None, transpose=False, gray_std=None, gray_disco=False):
         '''
         Configure outputs and augmentation.
         '''
@@ -373,6 +373,8 @@ class XvertsegSequence(keras.utils.Sequence):
         self.flip = flip
         self.transpose = transpose
         self.gray_std = gray_std
+        self.gray_disco = gray_disco
+        return self
         
         
     def __len__(self):
@@ -385,18 +387,22 @@ class XvertsegSequence(keras.utils.Sequence):
         '''
         idx: batch index
         '''
-        # print(f'NiftiSequence: getting item {idx}')
+#         print(f'Sequence: getting item {idx}')
         
         batch_infos = self.infos.loc[idx * self.batch_size:(idx + 1) * self.batch_size - 1, :]
-        
+#         print('idx', idx, 'batch_size', self.batch_size)
+#         print('batch_infos', batch_infos)
         batch_x = []
         batch_y = []
-        for info in batch_infos:
-            img_path = info['pp_image_path']
-            mask_path = info['pp_mask_path']
+        for i, batch_info in batch_infos.iterrows(): # range(len(batch_infos)):
+            
+#             img_path = batch_infos.loc[i, 'pp_image_path']
+#             mask_path = batch_infos.loc[i, 'pp_mask_path']
+            img_path = batch_info['pp_image_path']
+            mask_path = batch_info['pp_mask_path']
             img = preprocessing.get_preprocessed_image(img_path)
-            mask = preprocessing.get_preprocessed_image(mask_path)
-            if not all(img.shape == mask.shape):
+            mask = binarize_mask(preprocessing.get_preprocessed_image(mask_path)).astype('uint8')
+            if not np.all(img.shape == mask.shape):
                 raise Exception('image shape != mask shape', img.shape, mask.shape)
 
             img, mask = augmentation.augment_image_and_mask(

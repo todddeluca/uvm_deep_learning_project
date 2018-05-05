@@ -87,10 +87,12 @@ def random_crop_indices(img_shape, crop_shape):
     returns: a list of (start_index, end_index) for each dimension.
     '''
     
+    # crop should fit in image
     assert all(img_shape[i] >= crop_shape[i] for i in range(len(crop_shape)))
     
+    # the maximum starting index so the crop stays inside img.
     maxes = [img_shape[i] - crop_shape[i] for i in range(len(crop_shape))]
-    # the starting corner of the crop
+    # the random starting corner of the crop
     starts = [random.randint(0, m) for m in maxes]
     
     bounds = [(starts[i], starts[i] + crop_shape[i]) for i in range(len(crop_shape))]
@@ -113,7 +115,7 @@ def random_crop(img, shape):
 
 def crop_image(img, bounds):
     # Whoa! Cropping a variable dimension shape. Cool.
-    return img[[slice(bound[0], bound[1]) for bound in bounds]]
+    return img[[slice(start_idx, end_idx) for start_idx, end_idx in bounds]]
 
 
 # def crop_images(imgs, bounds):
@@ -168,23 +170,23 @@ def transpose_image(image, dims):
 ## AUGMENTATION
 
 def random_augmentations(shape, crop_shape=None, flip=None, transpose=False):
-    bounds = augmentation.random_crop_indices(shape, crop_shape) if crop_shape else None
+    bounds = random_crop_indices(shape, crop_shape) if crop_shape else None
     flip_dims = random_flip_dimensions(len(shape), p=flip) if flip else None
     transpose_dims = random_transpose_dimensions(len(shape)) if transpose else None
     return bounds, flip_dims, transpose_dims
 
 
-def _augment_image(img, gray_std=None, gray_disco=False, crop_bounds=None, flip_dims=None, transpose_dims=False):
+def _augment_image(img, gray_std=None, gray_disco=False, crop_bounds=None, flip_dims=None, transpose_dims=None):
     if crop_bounds is not None:
-        img = crop_image(img, bounds)
+        img = crop_image(img, crop_bounds)
 
     if gray_std is not None:
         img = gray_value_augment_image(img, std=gray_std, disco=gray_disco)
     
-    if flip_dims:
+    if flip_dims is not None:
         img = flip_image(img, flip_dims)
         
-    if transpose_dims:
+    if transpose_dims is not None:
         img = transpose_image(img, transpose_dims)
 
     return img
@@ -195,7 +197,7 @@ def augment_image_and_mask(img, mask, crop_shape=None, gray_std=None, gray_disco
     Augment an image and mask with the same random crop, flips, and transpositions.
     '''
     # image and mask must have the same crop, flip, and transpose to match.
-    bounds, flip_dims, transpose_dims = random_augmentations(img.shape, crop_shape=crop_shape, flip=flip, transpose=transpose)
+    crop_bounds, flip_dims, transpose_dims = random_augmentations(img.shape, crop_shape=crop_shape, flip=flip, transpose=transpose)
     img = _augment_image(img, gray_std=gray_std, gray_disco=gray_disco, crop_bounds=crop_bounds, 
                          flip_dims=flip_dims, transpose_dims=transpose_dims)
     mask = _augment_image(mask, crop_bounds=crop_bounds, flip_dims=flip_dims, transpose_dims=transpose_dims)
