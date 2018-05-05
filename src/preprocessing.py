@@ -179,6 +179,12 @@ def read_preprocessed_metadata(path):
     return infos
 
 
+def make_preprocessed_metadata_fun(path):
+    def md():
+        return read_preprocessed_metadata(path)
+    return md
+
+
 def main():
     '''
     Example of how to preprocess the dataset.

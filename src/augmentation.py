@@ -80,6 +80,23 @@ def scale_image(image, scale_factor):
 
 ## RANDOM CROPPING
 
+def random_crop_indices(img_shape, crop_shape):
+    '''
+    Choose a random bounding box inside img_shape of size crop_shape.
+    
+    returns: a list of (start_index, end_index) for each dimension.
+    '''
+    
+    assert all(img_shape[i] >= crop_shape[i] for i in range(len(crop_shape)))
+    
+    maxes = [img_shape[i] - crop_shape[i] for i in range(len(crop_shape))]
+    # the starting corner of the crop
+    starts = [random.randint(0, m) for m in maxes]
+    
+    bounds = [(starts[i], starts[i] + crop_shape[i]) for i in range(len(crop_shape))]
+    return bounds
+
+    
 def random_crop(img, shape):
     '''
     Randomly crop an image to a shape.  Location is chosen at random from
@@ -89,15 +106,22 @@ def random_crop(img, shape):
     shape: size of cropped volume.  e.g. (32, 32, 32)
     '''
     assert all(img.shape[i] >= shape[i] for i in range(len(shape)))
-    
-    # if img.shape[i] == 32 and shape[i] == 32, i_max == 0.
-    maxes = [img.shape[i] - shape[i] for i in range(len(shape))]
-    # the starting corner of the crop
-    starts = [random.randint(0, m) for m in maxes]
-    # Whoa! Cropping a variable dimension shape. Cool.
-    cropped_img = img[[slice(starts[i], starts[i] + shape[i]) for i in range(len(shape))]]
-    return cropped_img
+    # start and end positions of the crop for each dimension of img.
+    bounds = random_crop_indices(img.shape, shape)
+    return crop_image(img, bounds)
         
+
+def crop_image(img, bounds):
+    # Whoa! Cropping a variable dimension shape. Cool.
+    return img[[slice(bound[0], bound[1]) for bound in bounds]]
+
+
+# def crop_images(imgs, bounds):
+#     '''
+#     Useful for cropping an image and a mask with the same crop
+#     '''
+#     return [crop_image(img, bounds) for img in imgs]
+
 
 ## FLIPPING
 
@@ -106,6 +130,7 @@ def random_crop(img, shape):
 def random_flip_dimensions(n_dims, p=0.5):
     '''
     Randomly select dimensions to flip with a probability p.
+    Return a list of dimensions to be flipped.
     '''
     # random selection of ones at a rate of p.
     idx = np.random.choice(a=[True, False], size=n_dims, p=[p, 1-p])
@@ -123,6 +148,9 @@ def flip_image(image, dims):
 
 
 def random_transpose_dimensions(n_dims):
+    '''
+    returns: a permutation of the dimensions (used to transpose dimensions in an np array)
+    '''
     return np.random.permutation(range(n_dims))
 
 
@@ -139,53 +167,55 @@ def transpose_image(image, dims):
 
 ## AUGMENTATION
 
+def random_augmentations(shape, crop_shape=None, flip=None, transpose=False):
+    bounds = augmentation.random_crop_indices(shape, crop_shape) if crop_shape else None
+    flip_dims = random_flip_dimensions(len(shape), p=flip) if flip else None
+    transpose_dims = random_transpose_dimensions(len(shape)) if transpose else None
+    return bounds, flip_dims, transpose_dims
 
-def augment_image(img, crop_shape=None, gray_std=None, gray_disco=False, flip=None, transpose=False):
-    '''
-    gray_disco: a silly argument for debugging which gives each slice a different gray augmentation, which creates
-      a strobe-like effect when animating the image by slice.
-    '''
-    if crop_shape is not None:
-        # print('random crop.  crop_shape:', crop_shape)
-        img = random_crop(img, crop_shape)
+
+def _augment_image(img, gray_std=None, gray_disco=False, crop_bounds=None, flip_dims=None, transpose_dims=False):
+    if crop_bounds is not None:
+        img = crop_image(img, bounds)
 
     if gray_std is not None:
-        # print('gray value augmentation.  gray_std:', gray_std)
         img = gray_value_augment_image(img, std=gray_std, disco=gray_disco)
     
-    if flip:
-        # print('flip augmentation.  flip:', flip)
-        img = flip_image(img, random_flip_dimensions(len(img.shape), p=flip))
-
-    if transpose:
-        dims = random_transpose_dimensions(len(img.shape))
-        # print('transpose augmentation.  random dims:', dims)
-        img = transpose_image(img, dims)
+    if flip_dims:
+        img = flip_image(img, flip_dims)
         
+    if transpose_dims:
+        img = transpose_image(img, transpose_dims)
+
     return img
 
 
-def augment_data(img, mask, affine, grey_std=None, flip=True):
-    n_dim = len(truth.shape)
-    if scale_deviation:
-        scale_factor = random_scale_factor(n_dim, std=scale_deviation)
-    else:
-        scale_factor = None
-    if flip:
-        flip_axis = random_flip_dimensions(n_dim)
-    else:
-        flip_axis = None
-    data_list = list()
-    for data_index in range(data.shape[0]):
-        image = get_image(data[data_index], affine)
-        data_list.append(resample_to_img(distort_image(image, flip_axis=flip_axis,
-                                                       scale_factor=scale_factor), image,
-                                         interpolation="continuous").get_data())
-    data = np.asarray(data_list)
-    truth_image = get_image(truth, affine)
-    truth_data = resample_to_img(distort_image(truth_image, flip_axis=flip_axis, scale_factor=scale_factor),
-                                 truth_image, interpolation="nearest").get_data()
-    return data, truth_data
+def augment_image_and_mask(img, mask, crop_shape=None, gray_std=None, gray_disco=False, flip=None, transpose=False):
+    '''
+    Augment an image and mask with the same random crop, flips, and transpositions.
+    '''
+    # image and mask must have the same crop, flip, and transpose to match.
+    bounds, flip_dims, transpose_dims = random_augmentations(img.shape, crop_shape=crop_shape, flip=flip, transpose=transpose)
+    img = _augment_image(img, gray_std=gray_std, gray_disco=gray_disco, crop_bounds=crop_bounds, 
+                         flip_dims=flip_dims, transpose_dims=transpose_dims)
+    mask = _augment_image(mask, crop_bounds=crop_bounds, flip_dims=flip_dims, transpose_dims=transpose_dims)
+    return img, mask
+
+
+def augment_image(img, crop_shape=None, gray_std=None, gray_disco=False, flip=None, transpose=False):
+    '''
+    Augment an image randomly with cropping, gray value scaling, flipping, transposing axes.
+    Return augmented image.
+    
+    gray_disco: a silly argument for debugging which gives each slice a different gray augmentation, which creates
+      a strobe-like effect when animating the image by slice.
+    '''
+    bounds, flip_dims, transpose_dims = random_augmentations(img.shape, crop_shape=crop_shape, flip=flip, transpose=transpose)
+    img = _augment_image(img, gray_std=gray_std, gray_disco=gray_disco, crop_bounds=crop_bounds, 
+                         flip_dims=flip_dims, transpose_dims=transpose_dims)
+    return img
+
+
 
 
 

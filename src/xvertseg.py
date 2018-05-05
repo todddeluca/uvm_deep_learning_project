@@ -27,6 +27,8 @@ from keras.utils.vis_utils import model_to_dot # visualize model
 
 import util
 import preprocessing
+import augmentation
+
 
 
 XVERTSEG_MASK_VALS = (200, 210, 220, 230, 240)
@@ -224,7 +226,7 @@ def resample_xvertseg_mask(mask, spacing, target_spacing, metadata_only=False, b
     return resampled_categorical_mask, resampled_spacing
 
 
-def add_triplet_to_infos(triplet, infos, i, col_prefix):
+def _add_triplet_to_infos(triplet, infos, i, col_prefix):
     '''
     For image_dim0, image_dim1, image_dim2 and all the others.
     '''
@@ -234,7 +236,8 @@ def add_triplet_to_infos(triplet, infos, i, col_prefix):
     return infos
     
     
-def preprocess_xvertseg(data_dir, dest_dir, metadata_path, start=0, metadata_only=False, delete_existing=False, bin_thresh=0.5):
+def preprocess_xvertseg(data_dir, dest_dir, metadata_path, start=0, metadata_only=False,
+                        delete_existing=False, bin_thresh=0.5):
 
     target_spacing = (1.0, 1.0, 1.0)
     preprocessing.delete_and_make_dir(delete_existing, dest_dir)
@@ -255,8 +258,8 @@ def preprocess_xvertseg(data_dir, dest_dir, metadata_path, start=0, metadata_onl
         print('image mhd path:', img_path)
         img, itk = load_xvertseg_img(img_path)
         spacing = np.array(itk.GetSpacing())    # spacing of voxels in world coor. (mm)
-        infos = add_triplet_to_infos(spacing, infos, i, 'image_pixdim')
-        infos = add_triplet_to_infos(img.shape, infos, i, 'image_dim')
+        infos = _add_triplet_to_infos(spacing, infos, i, 'image_pixdim')
+        infos = _add_triplet_to_infos(img.shape, infos, i, 'image_dim')
 
         print('img shape:', img.shape)
         print('img spacing:', spacing)
@@ -266,8 +269,8 @@ def preprocess_xvertseg(data_dir, dest_dir, metadata_path, start=0, metadata_onl
             img, spacing, target_spacing, metadata_only=metadata_only)
         print('resampled image shape:', resampled_img.shape)
         print('resampled image spacing:', resampled_spacing)
-        infos = add_triplet_to_infos(resampled_spacing, infos, i, 'pp_image_pixdim')
-        infos = add_triplet_to_infos(resampled_img.shape, infos, i, 'pp_image_dim')
+        infos = _add_triplet_to_infos(resampled_spacing, infos, i, 'pp_image_pixdim')
+        infos = _add_triplet_to_infos(resampled_img.shape, infos, i, 'pp_image_dim')
         
         # Normalize voxel intensities
         if not metadata_only:
@@ -288,8 +291,8 @@ def preprocess_xvertseg(data_dir, dest_dir, metadata_path, start=0, metadata_onl
             mask_spacing = np.array(mitk.GetSpacing()) # xyz spacing
             print('mask shape:', mimg.shape)
             print('mask spacing:', mask_spacing)
-            infos = add_triplet_to_infos(mask_spacing, infos, i, 'mask_pixdim')
-            infos = add_triplet_to_infos(mimg.shape, infos, i, 'mask_dim')
+            infos = _add_triplet_to_infos(mask_spacing, infos, i, 'mask_pixdim')
+            infos = _add_triplet_to_infos(mimg.shape, infos, i, 'mask_dim')
             
             if not np.all(mask_spacing == spacing):
                 raise Exception('mask_spacing != spacing', mask_spacing, spacing)
@@ -302,8 +305,8 @@ def preprocess_xvertseg(data_dir, dest_dir, metadata_path, start=0, metadata_onl
             if not np.all(rmask.shape == resampled_img.shape):
                 raise Exception('resampled mask shape != resampled image shape', rmask.shape, resampled_img.shape)
 
-            infos = add_triplet_to_infos(rmspacing, infos, i, 'pp_mask_pixdim')
-            infos = add_triplet_to_infos(rmask.shape, infos, i, 'pp_mask_dim')
+            infos = _add_triplet_to_infos(rmspacing, infos, i, 'pp_mask_pixdim')
+            infos = _add_triplet_to_infos(rmask.shape, infos, i, 'pp_mask_dim')
 
             path = get_preprocessed_xvertseg_mask_path(infos.loc[i, 'id'], dest_dir)
             infos.loc[i, 'pp_mask_path'] = str(path)
@@ -331,6 +334,137 @@ def read_xvertseg_metadata(path):
         infos = pickle.loads(fh.read())
     
     return infos
+
+
+
+class XvertsegSequence(keras.utils.Sequence):
+    '''
+    Yields an input image (possibly cropped) and for output one or more of:
+    - a binary mask
+    - a categorical mask
+    - categorical labels (for uncropped images)
+    '''
+
+    def __init__(self, infos, batch_size=1, shuffle=True, crop_shape=None, flip=None, 
+                 transpose=False, gray_std=None):
+        '''
+        infos: dataframe containing image path and segmentation mask path.
+        '''
+        self.batch_size = batch_size
+        self.shuffle = shuffle
+
+        if shuffle:
+            # shuffle x and y with the same shuffled index to preserve pairing of examples and labels.
+            shuffled_idx = random.sample(range(len(infos)), k=len(infos))
+            self.infos = infos.iloc[shuffled_idx].reset_index(drop=True) # shuffle and zero-index df
+        else:
+            self.infos = infos.reset_index(drop=True) # zero-index df
+        
+        # configure outputs and augmentation
+        self.config(crop_shape=crop_shape, flip=flip, 
+                    transpose=transpose, gray_std=gray_std)
+    
+    def config(self, batch_size=1, crop_shape=None, flip=None, transpose=False, gray_std=None):
+        '''
+        Configure outputs and augmentation.
+        '''
+        self.batch_size = batch_size
+        self.crop_shape = crop_shape
+        self.flip = flip
+        self.transpose = transpose
+        self.gray_std = gray_std
+        
+        
+    def __len__(self):
+        '''
+        Return number of batches, based on batch_size
+        '''
+        return int(np.ceil(len(self.infos) / float(self.batch_size)))
+
+    def __getitem__(self, idx):
+        '''
+        idx: batch index
+        '''
+        # print(f'NiftiSequence: getting item {idx}')
+        
+        batch_infos = self.infos.loc[idx * self.batch_size:(idx + 1) * self.batch_size - 1, :]
+        
+        batch_x = []
+        batch_y = []
+        for info in batch_infos:
+            img_path = info['pp_image_path']
+            mask_path = info['pp_mask_path']
+            img = preprocessing.get_preprocessed_image(img_path)
+            mask = preprocessing.get_preprocessed_image(mask_path)
+            if not all(img.shape == mask.shape):
+                raise Exception('image shape != mask shape', img.shape, mask.shape)
+
+            img, mask = augmentation.augment_image_and_mask(
+                img, mask, crop_shape=self.crop_shape, gray_std=self.gray_std,
+                gray_disco=self.gray_disco, flip=self.flip, transpose=self.transpose)
+            
+            batch_x.append(np.expand_dims(img, axis=-1))
+            batch_y.append(np.expand_dims(mask, axis=-1))
+            
+        return (np.array(batch_x), np.array(batch_y))
+    
+    def on_epoch_end(self):
+        if self.shuffle:
+            shuffled_idx = random.sample(range(len(self.infos)), k=len(self.infos))
+            self.infos = self.infos.iloc[shuffled_idx].reset_index(drop=True) # shuffle and zero-index df
+
+
+
+def get_xvertseg_datagens(preprocessed_metadata_fun, batch_size=1, seed=None, validation_split=0.25,
+                         test_split=None):
+    '''
+    validation_split: the percentage of the dataset set aside for the validation set.
+    test_split: the percentage of the dataset set aside for the test set.  Default: None.
+      Specify something other than None to get a (train, val, test) tuple returned.
+    
+    Each group is split into train and validation (and test) according to validation_split
+    and test_split.
+    
+    Return a tuple of training Sequence and validation Sequence (and test Sequence).
+    '''
+       
+    # gather
+    infos = preprocessed_metadata_fun()
+    seg_infos = infos[infos['pp_mask_path'].notna()]
+    
+    # shuffle
+    shuffled = seg_infos.sample(frac=1, random_state=seed)
+    
+    # split
+    val_end = int(len(shuffled) * validation_split) # size of val set
+    if test_split:
+        test_end = int(len(shuffled) * (validation_split + test_split))
+    else:
+        test_end = val_end
+        
+    val = shuffled.iloc[:val_end, :].reset_index(drop=True)
+    if test_split:
+        test = shuffled.iloc[val_end:test_end, :].reset_index(drop=True)
+        train = shuffled.iloc[test_end:, :].reset_index(drop=True)
+    else:
+        train = shuffled.iloc[val_end:, :].reset_index(drop=True)
+    print('Train set size:', len(train))
+    print('Val set size:', len(val))
+    if test_split:
+        print('Test set size:', len(test))
+
+    print('Batch size:', batch_size)
+    train_gen = XvertsegSequence(train, batch_size=batch_size)
+    val_gen = XvertsegSequence(val, batch_size=batch_size)
+    if test_split:
+        test_gen = XvertsegSequence(test, batch_size=batch_size)
+    print('Num train batches:', len(train_gen))
+    print('Num val batches:', len(val_gen))
+    
+    if test_split:
+        return train_gen, val_gen, test_gen
+    else:
+        return train_gen, val_gen
 
 
 

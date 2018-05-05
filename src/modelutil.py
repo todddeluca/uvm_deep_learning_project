@@ -46,7 +46,61 @@ importlib.reload(preprocessing)
 import datagen
 importlib.reload(datagen)
         
-        
+
+##########################
+# External Callbacks Style
+##########################
+
+def get_epoch_model_path_template(models_dir, model_name):
+    return models_dir / (model_name +'_{epoch:02d}.h5')
+
+
+def get_epoch_model_path(models_dir, model_name, epoch):
+    '''
+    Paths match the template that the keras checkpoint callback uses to save models.
+    The model is saved as {model_name}_E{epoch}.
+    '''
+    model_path = Path(models_dir) / f'{model_name}_E{epoch:03d}.h5'
+    return model_path
+
+
+def get_epoch_model(models_dir, model_name, epoch):
+    '''
+    Load keras model for the specified epoch.
+    '''
+    path = get_epoch_model_path(models_dir, model_name, epoch)
+    model = keras.models.load_model(path)
+    return model
+
+
+def get_tensorboard_callback(tensorboard_dir, model_name, histogram_freq=0, write_graph=True, write_images=True):
+    log_dir = tensorboard_dir / model_name
+    print('tensorboard log dir:', log_dir)
+    cb = keras.callbacks.TensorBoard(
+        log_dir=str(log_dir), histogram_freq=0, write_graph=True, write_images=True)
+    return cb
+
+
+def get_logger_callback(log_dir, model_name, separator=',', append=False):
+    # Save logs for each run to logfile
+    log_path = log_dir / (model_name + '_' + datetime.datetime.now().isoformat() + '_log.csv')
+    print('log_path:', log_path)
+    cb = keras.callbacks.CSVLogger(str(log_path), separator=separator, append=append)
+    return cb
+
+
+def get_checkpoint_callback(models_dir, model_name, monitor='val_loss', verbose=1, save_best_only=False, 
+                            save_weights_only=False, mode='auto', period=1):
+    model_path_template = get_epoch_model_path_template(models_dir, model_name)
+    print('model_path_template:', model_path_template)
+    cb = keras.callbacks.ModelCheckpoint(
+        str(model_path_template), monitor=monitor, verbose=verbose, save_best_only=save_best_only, 
+        save_weights_only=save_weights_only, mode=mode, period=period)
+    return cb
+
+
+
+
 def display(model):
     print(model.summary())
     return SVG(model_to_dot(model).create(prog='dot', format='svg'))
