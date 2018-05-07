@@ -52,7 +52,7 @@ importlib.reload(datagen)
 ##########################
 
 def get_epoch_model_path_template(models_dir, model_name):
-    return models_dir / (model_name +'_{epoch:02d}.h5')
+    return models_dir / (model_name +'_E{epoch:03d}.h5')
 
 
 def get_epoch_model_path(models_dir, model_name, epoch):
@@ -64,12 +64,12 @@ def get_epoch_model_path(models_dir, model_name, epoch):
     return model_path
 
 
-def get_epoch_model(models_dir, model_name, epoch):
+def get_epoch_model(models_dir, model_name, epoch, custom_objects=None):
     '''
     Load keras model for the specified epoch.
     '''
     path = get_epoch_model_path(models_dir, model_name, epoch)
-    model = keras.models.load_model(path)
+    model = keras.models.load_model(path, custom_objects=custom_objects)
     return model
 
 
@@ -191,22 +191,60 @@ def vizualize_predictions_by_epochs(models_dir, model_name, epochs, train_gen, v
                 yield util.animate_crop(np.squeeze(batch_pred[i]), step=step)
                 yield util.animate_crop(np.squeeze(batch_y[i]), step=step)
           
-        
-def confusion_matrix_by_epochs(models_dir, model_name, epochs, val_gen):
+
+def models_by_epoch(models_dir, model_name, epochs, custom_objects=None):
+    for epoch in epochs:
+            print('Epoch {}:'.format(epoch))
+            path = get_model_path(models_dir, model_name, epoch)
+            model = keras.models.load_model(path, custom_objects=custom_objects)  
+            yield model, epoch
+     
+    
+def plot_binary_confusion_matrix(model, data_gen, thresh=0.5):
+    y_true = []
+    y_pred = []                                        
+    for i in range(len(data_gen)):
+        batch_x, batch_y = data_gen[i]
+        # print(f'predicting batch {i}')
+        batch_pred = model.predict_on_batch(batch_x)
+        batch_pred = batch_pred > thresh
+        print('dtype, shape, 0s, 1s, others')
+        print('batch_pred', batch_pred.dtype, batch_pred.shape, np.sum(batch_pred == 0), np.sum(batch_pred == 1), np.sum((batch_pred != 0) & (batch_pred != 1)))
+        print('batch_y', batch_y.dtype, batch_y.shape, np.sum(batch_y == 0), np.sum(batch_y == 1), np.sum((batch_y != 0) & (batch_y != 1)))
+        y_true.extend(batch_y)
+        y_pred.extend(batch_pred)
+
+    y_true = np.ravel(np.array(y_true))
+    y_pred = np.ravel(np.array(y_pred))
+    mat = confusion_matrix(y_true, y_pred)
+    plot_confusion_matrix(mat, [0, 1])
+    
+    
+def confusion_matrix_by_epochs(models_dir, model_name, epochs, data_gen, custom_objects=None, thresh=0.5):
+    '''
+    custom_objects: a dictionary mapping name to object.  Used for loading a keras model that, e.g., has a custom loss function.
+    '''
+    
     for epoch in epochs:
         print('Epoch {}:'.format(epoch))
         path = get_model_path(models_dir, model_name, epoch)
-        model = keras.models.load_model(path)
+        model = keras.models.load_model(path, custom_objects=custom_objects)
         y_true = []
         y_pred = []                                        
-        for i in range(len(val_gen)):
-            batch_x, batch_y = val_gen[i]
+        for i in range(len(data_gen)):
+            batch_x, batch_y = data_gen[i]
             # print(f'predicting batch {i}')
             batch_pred = model.predict_on_batch(batch_x)
+            batch_pred = batch_pred > thresh
+            print('dtype, shape, 0s, 1s, others')
+            print('batch_pred', batch_pred.dtype, batch_pred.shape, np.sum(batch_pred == 0), np.sum(batch_pred == 1), np.sum((batch_pred != 0) & (batch_pred != 1)))
+            print('batch_y', batch_y.dtype, batch_y.shape, np.sum(batch_y == 0), np.sum(batch_y == 1), np.sum((batch_y != 0) & (batch_y != 1)))
             y_true.extend(batch_y)
             y_pred.extend(batch_pred)
         
-        mat = confusion_matrix(np.array(y_true), np.array(y_pred))
+        y_true = np.ravel(np.array(y_true))
+        y_pred = np.ravel(np.array(y_pred))
+        mat = confusion_matrix(y_true, y_pred)
         plot_confusion_matrix(mat, [0, 1])
 
 
@@ -218,6 +256,7 @@ def plot_confusion_matrix(cm, classes,
     http://scikit-learn.org/stable/auto_examples/model_selection/plot_confusion_matrix.html#sphx-glr-auto-examples-model-selection-plot-confusion-matrix-py
     This function prints and plots the confusion matrix.
     Normalization can be applied by setting `normalize=True`.
+    
     """
     if normalize:
         cm = cm.astype('float') / cm.sum(axis=1)[:, np.newaxis]

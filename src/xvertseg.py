@@ -346,62 +346,119 @@ class XvertsegSequence(keras.utils.Sequence):
     '''
 
     def __init__(self, infos, batch_size=1, shuffle=True, crop_shape=None, flip=None, 
-                 transpose=False, gray_std=None, gray_disco=False):
+                 transpose=False, gray_std=None, gray_disco=False, num_samples=1, length=None):
         '''
         infos: dataframe containing image path and segmentation mask path.
+        num_samples: the number of samples per image to return.  The length of the sequence
+        is num_samples * len(infos).
+        length: if None, the length of the sequence will be around 
+          len(infos) * num_samples / batch_size.  Otherwise length infos will be assigned to each epoch.
+          If shuffle is True, infos will be assigned randomly without replacement until length infos
+          have been chosen.  If length is more than the number of infos, infos will be repeatedly
+          sampled from without replacement until length samples have been taken.  This ensures that 
+          every info is represented in the sequence the same number of times except for a 
+          number of randomly selected infos which are represented one more time.
         '''
+        self.infos = infos
         self.batch_size = batch_size
         self.shuffle = shuffle
+        self.length = length 
+        self.crop_shape=crop_shape
+        self.flip=flip
+        self.transpose=transpose
+        self.gray_std=gray_std
+        self.gray_disco=gray_disco
+        self.num_samples=num_samples            
 
-        if shuffle:
-            # shuffle x and y with the same shuffled index to preserve pairing of examples and labels.
-            shuffled_idx = random.sample(range(len(infos)), k=len(infos))
-            self.infos = infos.iloc[shuffled_idx].reset_index(drop=True) # shuffle and zero-index df
-        else:
-            self.infos = infos.reset_index(drop=True) # zero-index df
+#         self.prev_img_path = None
+#         self.prev_mask_path = None
+#         self.prev_img = None
+#         self.prev_mask = None
+
+        # the order in which infos are returned in all the batches
+        self.reindex() 
         
-        # configure outputs and augmentation
-        self.config(crop_shape=crop_shape, flip=flip, 
-                    transpose=transpose, gray_std=gray_std, gray_disco=gray_disco)
-    
-    def config(self, batch_size=1, crop_shape=None, flip=None, transpose=False, gray_std=None, gray_disco=False):
+    def config(self, **kwargs):
         '''
-        Configure outputs and augmentation.
+        Configure training and evaluation parameters like batch_size, flip, transpose, crop_size.
         '''
-        self.batch_size = batch_size
-        self.crop_shape = crop_shape
-        self.flip = flip
-        self.transpose = transpose
-        self.gray_std = gray_std
-        self.gray_disco = gray_disco
+        for key, val in kwargs.items():
+            self.__setattr__(key, val)
+
         return self
         
+    def reindex(self):
+        self.idxs = self._shuffle()
+        return self
+    
+    def _shuffle(self):
+        '''
+        '''
+        gen = self._shuffle_info_index_gen()
         
+        if self.length is not None:
+            sample_len = self.length * self.batch_size
+        else:
+            sample_len = len(self.infos) * self.num_samples
+            
+        # length batches, batch_size items per batch.
+        return [next(gen) for i in range(sample_len)]
+    
+                             
+    def _shuffle_info_index_gen(self):
+        '''
+        yield an infinite stream of shuffled info indices.  The indices are sampled at random without replacement and yielded until every index has been yielded.  This process is repeated as needed, to balance the frequency at which infos appear in sequence.
+        '''
+        while True:
+            if self.shuffle:
+                idxs = random.sample(range(len(self.infos)), k=len(self.infos))
+            else:
+                idxs = [i for i in range(len(self.infos))]
+            for idx in idxs:
+                yield idx
+            
+
     def __len__(self):
         '''
         Return number of batches, based on batch_size
         '''
-        return int(np.ceil(len(self.infos) / float(self.batch_size)))
+        if self.length:
+            return self.length
+        else:
+            return int(np.ceil(self.num_samples * len(self.infos) / float(self.batch_size)))
 
     def __getitem__(self, idx):
         '''
-        idx: batch index
+        idx: from range(len(Sequence))
         '''
-#         print(f'Sequence: getting item {idx}')
-        
-        batch_infos = self.infos.loc[idx * self.batch_size:(idx + 1) * self.batch_size - 1, :]
-#         print('idx', idx, 'batch_size', self.batch_size)
-#         print('batch_infos', batch_infos)
+        # print(f'Sequence: getting item {idx}')
+        sample_start = idx * self.batch_size
+        # last batch might not be full
+        sample_end = min(sample_start + self.batch_size, len(self.idxs))
+#         print('sample_start, sample_end', sample_start, sample_end)
+        # fill up last batch.  give the people what they want.
+        # sample_end = sample_start + self.batch_size 
+
         batch_x = []
         batch_y = []
-        for i, batch_info in batch_infos.iterrows(): # range(len(batch_infos)):
-            
-#             img_path = batch_infos.loc[i, 'pp_image_path']
-#             mask_path = batch_infos.loc[i, 'pp_mask_path']
+        for info_idx in self.idxs[sample_start:sample_end]:
+            batch_info = self.infos.loc[info_idx]
             img_path = batch_info['pp_image_path']
             mask_path = batch_info['pp_mask_path']
+#             if (img_path == self.prev_img_path): # assume mask and image path change with each other.
+#                 img = self.prev_img
+#                 mask = self.prev_mask
+#             else:
+#                 img = preprocessing.get_preprocessed_image(img_path)
+#                 mask = binarize_mask(preprocessing.get_preprocessed_image(mask_path)).astype('uint8')
+#                 self.prev_img_path = img_path
+#                 self.prev_mask_path = mask_path
+#                 self.prev_img = img
+#                 self.prev_mask = mask
+                
             img = preprocessing.get_preprocessed_image(img_path)
             mask = binarize_mask(preprocessing.get_preprocessed_image(mask_path)).astype('uint8')
+
             if not np.all(img.shape == mask.shape):
                 raise Exception('image shape != mask shape', img.shape, mask.shape)
 
@@ -413,23 +470,90 @@ class XvertsegSequence(keras.utils.Sequence):
             batch_y.append(np.expand_dims(mask, axis=-1))
             
         return (np.array(batch_x), np.array(batch_y))
+        
+        
+        # length index -> batch of samples -> batch of infos -> batch of img, mask -> return batches
+        
+#         sample_start = idx * self.batch_size
+#         sample_end = min(sample_start + self.batch_size, self.num_samples * len(self.infos)) # last batch might not be full
+#         batch_x = []
+#         batch_y = []
+#         for sample_idx in range(sample_start, sample_end):
+#             info_idx = sample_idx // self.num_samples  # the info that corresponds to the given sample
+#             batch_info = self.infos.loc[info_idx]
+#             img_path = batch_info['pp_image_path']
+#             mask_path = batch_info['pp_mask_path']
+#             if (img_path == self.prev_img_path): # assume mask and image path change with each other.
+#                 img = self.prev_img
+#                 mask = self.prev_mask
+#             else:
+#                 img = preprocessing.get_preprocessed_image(img_path)
+#                 mask = binarize_mask(preprocessing.get_preprocessed_image(mask_path)).astype('uint8')
+#                 self.prev_img_path = img_path
+#                 self.prev_mask_path = mask_path
+#                 self.prev_img = img
+#                 self.prev_mask = mask
+                
+#             if not np.all(img.shape == mask.shape):
+#                 raise Exception('image shape != mask shape', img.shape, mask.shape)
+
+#             img, mask = augmentation.augment_image_and_mask(
+#                 img, mask, crop_shape=self.crop_shape, gray_std=self.gray_std,
+#                 gray_disco=self.gray_disco, flip=self.flip, transpose=self.transpose)
+            
+#             batch_x.append(np.expand_dims(img, axis=-1))
+#             batch_y.append(np.expand_dims(mask, axis=-1))
+            
+#         return (np.array(batch_x), np.array(batch_y))
+   
+    
+#         batch_info_start = idx // num_samples # 0..num_samples-1 => 0.  num_samples..(2*num_samples - 1) => 1.
+#         batch_info_end = (idx + (self.batch_size - 1)) // num_samples
+#         batch_infos = self.infos.loc[idx * self.batch_size:(idx + 1) * self.batch_size - 1, :]
+# #         print('idx', idx, 'batch_size', self.batch_size)
+# #         print('batch_infos', batch_infos)
+#         batch_x = []
+#         batch_y = []
+#         for i, batch_info in batch_infos.iterrows(): # range(len(batch_infos)):
+            
+# #             img_path = batch_infos.loc[i, 'pp_image_path']
+# #             mask_path = batch_infos.loc[i, 'pp_mask_path']
+#             img_path = batch_info['pp_image_path']
+#             mask_path = batch_info['pp_mask_path']
+#             img = preprocessing.get_preprocessed_image(img_path)
+#             mask = binarize_mask(preprocessing.get_preprocessed_image(mask_path)).astype('uint8')
+#             if not np.all(img.shape == mask.shape):
+#                 raise Exception('image shape != mask shape', img.shape, mask.shape)
+
+#             img, mask = augmentation.augment_image_and_mask(
+#                 img, mask, crop_shape=self.crop_shape, gray_std=self.gray_std,
+#                 gray_disco=self.gray_disco, flip=self.flip, transpose=self.transpose)
+            
+#             batch_x.append(np.expand_dims(img, axis=-1))
+#             batch_y.append(np.expand_dims(mask, axis=-1))
+            
+#         return (np.array(batch_x), np.array(batch_y))
     
     def on_epoch_end(self):
-        if self.shuffle:
-            shuffled_idx = random.sample(range(len(self.infos)), k=len(self.infos))
-            self.infos = self.infos.iloc[shuffled_idx].reset_index(drop=True) # shuffle and zero-index df
+        self.reindex()
+
+#         if self.shuffle:
+#             shuffled_idx = random.sample(range(len(self.infos)), k=len(self.infos))
+#             self.infos = self.infos.iloc[shuffled_idx].reset_index(drop=True) # shuffle and zero-index df
 
 
 
-def get_xvertseg_datagens(preprocessed_metadata_fun, batch_size=1, seed=None, validation_split=0.25,
+def get_xvertseg_datagens(preprocessed_metadata_fun, seed=None, validation_split=0.25,
                          test_split=None):
     '''
+    Each group is split into train and validation (and test) according to validation_split
+    and test_split.
+
+    seed: a random seed.  Used to make the shuffling and splitting reproducible.
     validation_split: the percentage of the dataset set aside for the validation set.
     test_split: the percentage of the dataset set aside for the test set.  Default: None.
       Specify something other than None to get a (train, val, test) tuple returned.
     
-    Each group is split into train and validation (and test) according to validation_split
-    and test_split.
     
     Return a tuple of training Sequence and validation Sequence (and test Sequence).
     '''
@@ -459,13 +583,10 @@ def get_xvertseg_datagens(preprocessed_metadata_fun, batch_size=1, seed=None, va
     if test_split:
         print('Test set size:', len(test))
 
-    print('Batch size:', batch_size)
-    train_gen = XvertsegSequence(train, batch_size=batch_size)
-    val_gen = XvertsegSequence(val, batch_size=batch_size)
+    train_gen = XvertsegSequence(train)
+    val_gen = XvertsegSequence(val)
     if test_split:
-        test_gen = XvertsegSequence(test, batch_size=batch_size)
-    print('Num train batches:', len(train_gen))
-    print('Num val batches:', len(val_gen))
+        test_gen = XvertsegSequence(test)
     
     if test_split:
         return train_gen, val_gen, test_gen
