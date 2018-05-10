@@ -51,6 +51,11 @@ importlib.reload(datagen)
 # External Callbacks Style
 ##########################
 
+
+def get_version_model_name(model_name, version):
+    return model_name + '_V' + version
+
+
 def get_epoch_model_path_template(models_dir, model_name):
     return models_dir / (model_name +'_E{epoch:03d}.h5')
 
@@ -205,7 +210,9 @@ def plot_binary_confusion_matrix(model, data_gen, thresh=0.5):
     y_pred = []                                        
     for i in range(len(data_gen)):
         batch_x, batch_y = data_gen[i]
-        # print(f'predicting batch {i}')
+        print(f'predicting batch {i}')
+        print(batch_x.shape, batch_y.shape)
+        
         batch_pred = model.predict_on_batch(batch_x)
         batch_pred = batch_pred > thresh
         print('dtype, shape, 0s, 1s, others')

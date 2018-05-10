@@ -23,6 +23,45 @@ def binary_dice_coefficient_loss(y_true, y_pred, smooth=1., thresh=0.5):
     return -binary_dice_coefficient(y_true, y_pred, smooth=smooth, thresh=thresh)
 
 
+def make_dice_coefficient_loss(smooth=1e-5, smooth_numerator=True, 
+                               kind='sorensen', binary=False, thresh=0.5):
+    '''
+    http://tensorlayer.readthedocs.io/en/latest/_modules/tensorlayer/cost.html
+    kind: 'jaccard' uses (a dot a) in the denominator for length. 
+      'sorensen' uses sum(a) in the denominator for length.  For binary matrices these are equivalent.
+    binary: If true, convert y_true and y_pred to contain only 0's and 1's.  
+      This is sometimes called the "hard" dice coefficient.
+    thresh: threshold, when converting to binary, s.t. > thresh = 1, < thresh = 0.
+    smooth_numerator: if 0, then if y_true is all 0, dice coef = 0, even if y_pred is all 0.  
+      The hope is that during training the network will ignore y_true patches that are all 0 and still learn to
+      predict zeros from the y_true patches that are not all 0.
+      If > 0, then if y_true is all 0 and y_pred is all 0, dice coef = 1, which intuitively is correct.
+    smooth: Avoids divide by zero issues when y_true and y_pred are both all 0.
+    '''
+    def dice_coefficient_loss(y_true, y_pred):
+        y_true_f = K.flatten(y_true)
+        y_pred_f = K.flatten(y_pred)
+        if binary:
+            dtype = y_true.dtype
+            y_true_f = K.cast(y_true_f > thresh, dtype=dtype)
+            y_pred_f = K.cast(y_pred_f > thresh, dtype=dtype)
+        if smooth_numerator:
+            smooth_n = smooth
+        else:
+            smooth_n = 0
+        intersection = K.sum(y_true_f * y_pred_f)
+        if kind == 'jaccard':
+            denom = K.sum(y_true_f * y_true_f) + K.sum(y_pred_f * y_pred_f)
+        elif kind == 'sorensen':
+            denom = K.sum(y_true_f) + K.sum(y_pred_f)
+        else:
+            raise Exception('Unrecognized kind.', kind)
+            
+        return -(2. * intersection + smooth_n) / (denom + smooth)
+
+    return dice_coefficient_loss
+    
+
 def dice_coefficient2(y_true, y_pred, smooth=1.):
     '''
     From 0 to 1.  The more overlap the better.  The less non-overlapping stuff the better.
@@ -36,6 +75,7 @@ def dice_coefficient2(y_true, y_pred, smooth=1.):
     y_pred_f = K.flatten(y_pred)
     intersection = K.sum(y_true_f * y_pred_f)
     return (2. * intersection + smooth) / (K.sum(y_true_f * y_true_f) + K.sum(y_pred_f * y_pred_f) + smooth)
+
 
 def dice_coefficient2_loss(y_true, y_pred):
     '''

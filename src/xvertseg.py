@@ -346,7 +346,8 @@ class XvertsegSequence(keras.utils.Sequence):
     '''
 
     def __init__(self, infos, batch_size=1, shuffle=True, crop_shape=None, flip=None, 
-                 transpose=False, gray_std=None, gray_disco=False, num_samples=1, length=None):
+                 transpose=False, gray_std=None, gray_disco=False, num_samples=1, length=None,
+                 require_mask=False):
         '''
         infos: dataframe containing image path and segmentation mask path.
         num_samples: the number of samples per image to return.  The length of the sequence
@@ -358,6 +359,7 @@ class XvertsegSequence(keras.utils.Sequence):
           sampled from without replacement until length samples have been taken.  This ensures that 
           every info is represented in the sequence the same number of times except for a 
           number of randomly selected infos which are represented one more time.
+        require_mask: if True, only random crops that have masked pixels will be used.
         '''
         self.infos = infos
         self.batch_size = batch_size
@@ -368,7 +370,8 @@ class XvertsegSequence(keras.utils.Sequence):
         self.transpose=transpose
         self.gray_std=gray_std
         self.gray_disco=gray_disco
-        self.num_samples=num_samples            
+        self.num_samples=num_samples
+        self.require_mask = require_mask
 
 #         self.prev_img_path = None
 #         self.prev_mask_path = None
@@ -445,17 +448,6 @@ class XvertsegSequence(keras.utils.Sequence):
             batch_info = self.infos.loc[info_idx]
             img_path = batch_info['pp_image_path']
             mask_path = batch_info['pp_mask_path']
-#             if (img_path == self.prev_img_path): # assume mask and image path change with each other.
-#                 img = self.prev_img
-#                 mask = self.prev_mask
-#             else:
-#                 img = preprocessing.get_preprocessed_image(img_path)
-#                 mask = binarize_mask(preprocessing.get_preprocessed_image(mask_path)).astype('uint8')
-#                 self.prev_img_path = img_path
-#                 self.prev_mask_path = mask_path
-#                 self.prev_img = img
-#                 self.prev_mask = mask
-                
             img = preprocessing.get_preprocessed_image(img_path)
             mask = binarize_mask(preprocessing.get_preprocessed_image(mask_path)).astype('uint8')
 
@@ -463,7 +455,7 @@ class XvertsegSequence(keras.utils.Sequence):
                 raise Exception('image shape != mask shape', img.shape, mask.shape)
 
             img, mask = augmentation.augment_image_and_mask(
-                img, mask, crop_shape=self.crop_shape, gray_std=self.gray_std,
+                img, mask, crop_shape=self.crop_shape, require_mask=self.require_mask, gray_std=self.gray_std,
                 gray_disco=self.gray_disco, flip=self.flip, transpose=self.transpose)
             
             batch_x.append(np.expand_dims(img, axis=-1))

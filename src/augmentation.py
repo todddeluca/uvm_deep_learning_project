@@ -192,16 +192,25 @@ def _augment_image(img, gray_std=None, gray_disco=False, crop_bounds=None, flip_
     return img
 
 
-def augment_image_and_mask(img, mask, crop_shape=None, gray_std=None, gray_disco=False, flip=None, transpose=False):
+def augment_image_and_mask(img, mask, crop_shape=None, gray_std=None, gray_disco=False, flip=None, transpose=False, require_mask=False):
     '''
     Augment an image and mask with the same random crop, flips, and transpositions.
+    require_mask: if True, random crops must have at least one masked voxel.
     '''
     # image and mask must have the same crop, flip, and transpose to match.
-    crop_bounds, flip_dims, transpose_dims = random_augmentations(img.shape, crop_shape=crop_shape, flip=flip, transpose=transpose)
-    img = _augment_image(img, gray_std=gray_std, gray_disco=gray_disco, crop_bounds=crop_bounds, 
-                         flip_dims=flip_dims, transpose_dims=transpose_dims)
-    mask = _augment_image(mask, crop_bounds=crop_bounds, flip_dims=flip_dims, transpose_dims=transpose_dims)
-    return img, mask
+    while True:
+        crop_bounds, flip_dims, transpose_dims = random_augmentations(img.shape, crop_shape=crop_shape, flip=flip, transpose=transpose)
+        aug_mask = _augment_image(mask, crop_bounds=crop_bounds, flip_dims=flip_dims,
+                              transpose_dims=transpose_dims)
+        if np.sum(aug_mask) == 0:
+            print('crop mask was all 0')
+            continue # try again with a different random crop
+            
+        aug_img = _augment_image(img, gray_std=gray_std, gray_disco=gray_disco, crop_bounds=crop_bounds, 
+                             flip_dims=flip_dims, transpose_dims=transpose_dims)
+        break
+    
+    return aug_img, aug_mask
 
 
 def augment_image(img, crop_shape=None, gray_std=None, gray_disco=False, flip=None, transpose=False):
